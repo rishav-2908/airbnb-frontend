@@ -1,0 +1,24 @@
+{
+  "name": "airbnb-frontend",
+  "version": "1.0.0",
+  "description": "Airbnb Clone Frontend Service",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "build": "tailwindcss -i ./views/input.css -o ./public/output.css",
+    "tailwind": "tailwindcss -i ./views/input.css -o ./public/output.css --watch"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "multer": "^2.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.0",
+    "nodemon": "^3.1.14",
+    "tailwindcss": "^4.3.0"
+  }
+}
