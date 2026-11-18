@@ -485,7 +485,9 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Frontend server running on http://localhost:${PORT}`);
+    // console.log(`Frontend server running on http://localhost:${PORT}`);
+    console.log(`Frontend server running on ${PORT}`);
+    // console.log(`Connected to Backend API at: ${BACKEND_URL}`);
     console.log(`Connected to Backend API at: ${BACKEND_URL}`);
 });
 
