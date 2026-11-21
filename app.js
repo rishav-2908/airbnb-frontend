@@ -1,7 +1,6 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
-const MongoDBStore = require('connect-mongodb-session')(session);
 const multer = require('multer');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
@@ -10,7 +9,6 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:5001').replace(/\/$/, '');
-const DB_PATH = (process.env.DB_PATH || '').replace(/^["']|["']$/g, '').trim();
 
 // View engine setup
 app.set('view engine', 'ejs');
@@ -32,34 +30,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(upload);
 
-// MongoDB session store (persists across serverless requests on Vercel)
-let sessionStore;
-if (DB_PATH) {
-    sessionStore = new MongoDBStore({
-        uri: DB_PATH,
-        collection: 'frontend_sessions',
-        connectionOptions: {
-            serverSelectionTimeoutMS: 5000
-        }
-    });
-    sessionStore.on('error', function(error) {
-        console.error('Frontend session store error:', error);
-    });
-} else {
-    console.warn('WARNING: DB_PATH not set — sessions will not persist (broken on Vercel)');
-}
-
 // Session middleware for frontend state
 app.use(session({
     secret: process.env.SESSION_SECRET || 'airbnb-frontend-session-key',
     resave: false,
     saveUninitialized: false,
-    store: sessionStore,  // undefined = in-memory (dev only), MongoDB store in prod
-    cookie: {
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
-        secure: process.env.NODE_ENV === 'production', // HTTPS only on prod (Vercel = HTTPS)
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
-    }
+    cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 
 app.use((req, res, next) => {
@@ -69,26 +45,16 @@ app.use((req, res, next) => {
     next();
 });
 
-// Helper for backend API fetch with timeout
-async function apiFetch(endpoint, options = {}, timeoutMs = 30000) {
+// Helper for backend API fetch
+async function apiFetch(endpoint, options = {}) {
     const url = `${BACKEND_URL}${endpoint}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(timer);
+        const response = await fetch(url, options);
         const data = await response.json().catch(() => null);
         return { ok: response.ok, status: response.status, data };
     } catch (err) {
-        clearTimeout(timer);
-        const isTimeout = err.name === 'AbortError';
-        console.error(`API Fetch Error [${url}]: ${isTimeout ? 'TIMEOUT after ' + timeoutMs + 'ms' : err.message}`);
-        return {
-            ok: false,
-            status: isTimeout ? 504 : 503,
-            data: null,
-            error: isTimeout ? 'Backend took too long to respond. It may be waking up — please try again in 30 seconds.' : err.message
-        };
+        console.error(`API Fetch Error [${url}]:`, err.message);
+        return { ok: false, status: 503, data: null, error: err.message };
     }
 }
 
@@ -107,31 +73,6 @@ app.get('/user/avatar/:userId', (req, res) => {
 });
 app.get('/rules/:homeId', (req, res) => {
     res.redirect(`${BACKEND_URL}/api/homes/${req.params.homeId}/rules`);
-});
-
-// ================= DEBUG (remove after fixing) ================= //
-app.get('/debug', async (req, res) => {
-    const backendCheck = await apiFetch('/api', {}, 10000);
-    res.json({
-        env: {
-            NODE_ENV: process.env.NODE_ENV,
-            BACKEND_URL: BACKEND_URL,
-            DB_PATH_SET: !!DB_PATH,
-            SESSION_SECRET_SET: !!process.env.SESSION_SECRET,
-        },
-        session: {
-            id: req.session?.id,
-            isLoggedIn: req.session?.isLoggedIn,
-            hasUser: !!req.session?.user,
-            storeType: sessionStore ? 'MongoDB' : 'in-memory (broken on Vercel)'
-        },
-        backend: {
-            reachable: backendCheck.ok,
-            status: backendCheck.status,
-            error: backendCheck.error || null,
-            data: backendCheck.data
-        }
-    });
 });
 
 // ================= STORE & HOMES ================= //
@@ -200,10 +141,7 @@ app.post('/login', async (req, res) => {
     });
 
     if (!result.ok || !result.data || !result.data.success) {
-        // Show the real error from the backend (or timeout message)
-        const errorMsg = result.error ||
-            (result.data && result.data.message) ||
-            `Login failed (status ${result.status}). Please try again.`;
+        const errorMsg = result.data && result.data.message ? result.data.message : 'Login failed. Please check credentials.';
         return res.status(422).render('auth/login', {
             pageTitle: 'Login',
             currentPage: 'login',
@@ -216,10 +154,7 @@ app.post('/login', async (req, res) => {
 
     req.session.isLoggedIn = true;
     req.session.user = result.data.user;
-    req.session.save((err) => {
-        if (err) {
-            console.error('Session save error:', err);
-        }
+    req.session.save(() => {
         res.redirect('/');
     });
 });
