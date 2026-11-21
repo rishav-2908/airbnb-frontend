@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
+const MongoDBStore = require('connect-mongodb-session')(session);
 const multer = require('multer');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
@@ -9,7 +10,7 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:5001').replace(/\/$/, '');
-
+const DB_PATH = (process.env.DB_PATH || '').replace(/^["']|["']$/g, '').trim();
 // View engine setup
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
