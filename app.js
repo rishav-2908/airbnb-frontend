@@ -1,7 +1,6 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
-const MongoDBStore = require('connect-mongodb-session')(session);
 const multer = require('multer');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
@@ -10,7 +9,7 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:5001').replace(/\/$/, '');
-const DB_PATH = (process.env.DB_PATH || '').replace(/^["']|["']$/g, '').trim();
+
 // View engine setup
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -32,35 +31,12 @@ app.use(express.json());
 app.use(upload);
 
 // Session middleware for frontend state
-// app.use(session({
-const sessionConfig = {
+app.use(session({
     secret: process.env.SESSION_SECRET || 'airbnb-frontend-session-key',
     resave: false,
     saveUninitialized: false,
-    cookie: {
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
-        secure: process.env.NODE_ENV === 'production', // HTTPS-only in production
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
-    }
-};
-
-if (DB_PATH) {
-    const store = new MongoDBStore({
-        uri: DB_PATH,
-        collection: 'frontend_sessions'
-    });
-    store.on('error', function (error) {
-        console.error('Frontend session store error:', error);
-    });
-    sessionConfig.store = store;
-    console.log('Using MongoDB session store');
-} else {
-    console.warn('Warning: DB_PATH not set — using in-memory session store (not suitable for production/Vercel)');
-}
-
-app.use(session(sessionConfig));
-//     cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
-// }));
+    cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
+}));
 
 app.use((req, res, next) => {
     res.locals.isLoggedIn = req.session ? !!req.session.isLoggedIn : false;
