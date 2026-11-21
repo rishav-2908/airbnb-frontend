@@ -2,17 +2,13 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const helmet = require('helmet');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
 
 const app = express();
-app.set('trust proxy', 1);
-app.use(helmet());
 
 const PORT = process.env.PORT || 3000;
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:5001').replace(/\/$/, '');
-const FRONTEND_URL = (process.env.FRONTEND_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 
 // View engine setup
 app.set('view engine', 'ejs');
@@ -23,43 +19,26 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Multer for in-memory file handling before forwarding to Backend API
 const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024, files: 3 }
+    storage: multer.memoryStorage()
 }).fields([
     { name: 'photo', maxCount: 1 },
     { name: 'profilePic', maxCount: 1 },
     { name: 'rules', maxCount: 1 }
 ]);
 
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(upload);
-
-if (!process.env.SESSION_SECRET) {
-    throw new Error('SESSION_SECRET environment variable is not configured');
-}
 
 // Session middleware for frontend state
 app.use(session({
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET || 'airbnb-frontend-session-key',
     resave: false,
     saveUninitialized: false,
-    cookie: {
-        maxAge: 1000 * 60 * 60 * 24 * 7,
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax'
-    }
+    cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 
 app.use((req, res, next) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-        const origin = req.headers.origin;
-        if (origin && origin !== FRONTEND_URL) {
-            return res.sendStatus(403);
-        }
-    }
-
     res.locals.isLoggedIn = req.session ? !!req.session.isLoggedIn : false;
     res.locals.user = req.session ? req.session.user : null;
     req.isLoggedIn = res.locals.isLoggedIn;
@@ -67,14 +46,10 @@ app.use((req, res, next) => {
 });
 
 // Helper for backend API fetch
-async function apiFetch(endpoint, options = {}, req = null) {
+async function apiFetch(endpoint, options = {}) {
     const url = `${BACKEND_URL}${endpoint}`;
-    const headers = new Headers(options.headers || {});
-    if (req && req.session && req.session.apiToken) {
-        headers.set('Authorization', `Bearer ${req.session.apiToken}`);
-    }
     try {
-        const response = await fetch(url, { ...options, headers });
+        const response = await fetch(url, options);
         const data = await response.json().catch(() => null);
         return { ok: response.ok, status: response.status, data };
     } catch (err) {
@@ -177,14 +152,10 @@ app.post('/login', async (req, res) => {
         });
     }
 
-    req.session.regenerate((err) => {
-        if (err) return res.redirect('/login');
-        req.session.isLoggedIn = true;
-        req.session.user = result.data.user;
-        req.session.apiToken = result.data.token;
-        req.session.save(() => {
-            res.redirect('/');
-        });
+    req.session.isLoggedIn = true;
+    req.session.user = result.data.user;
+    req.session.save(() => {
+        res.redirect('/');
     });
 });
 
@@ -224,7 +195,7 @@ app.post('/signup', async (req, res) => {
 });
 
 app.post('/logout', async (req, res) => {
-    await apiFetch('/api/auth/logout', { method: 'POST' }, req);
+    await apiFetch('/api/auth/logout', { method: 'POST' });
     req.session.destroy(() => {
         res.redirect('/login');
     });
@@ -236,7 +207,9 @@ app.get('/favourite-list', async (req, res) => {
     if (!req.isLoggedIn || (req.session.user && req.session.user.userType !== 'guest')) {
         return res.redirect('/login');
     }
-    const result = await apiFetch('/api/favourites', {}, req);
+    const result = await apiFetch('/api/favourites', {
+        headers: { 'x-user-id': req.session.user._id }
+    });
     const favouriteHomes = result.data && result.data.favourites ? result.data.favourites : [];
     res.render('store/favourite-list', {
         favouriteHomes,
@@ -253,9 +226,12 @@ app.post('/favourite-list', async (req, res) => {
     }
     await apiFetch('/api/favourites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': req.session.user._id
+        },
         body: JSON.stringify({ homeId: req.body.id })
-    }, req);
+    });
     res.redirect('/favourite-list');
 });
 
@@ -263,7 +239,10 @@ app.post('/homes/delete-favourite/:homeId', async (req, res) => {
     if (!req.isLoggedIn || (req.session.user && req.session.user.userType !== 'guest')) {
         return res.redirect('/login');
     }
-    await apiFetch(`/api/favourites/${req.params.homeId}`, { method: 'DELETE' }, req);
+    await apiFetch(`/api/favourites/${req.params.homeId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': req.session.user._id }
+    });
     res.redirect('/favourite-list');
 });
 
@@ -271,7 +250,9 @@ app.post('/homes/delete-favourite/:homeId', async (req, res) => {
 
 app.get('/bookings', async (req, res) => {
     if (!req.isLoggedIn) return res.redirect('/login');
-    const result = await apiFetch('/api/bookings', {}, req);
+    const result = await apiFetch('/api/bookings', {
+        headers: { 'x-user-id': req.session.user._id }
+    });
     const bookings = result.data && result.data.bookings ? result.data.bookings : [];
     res.render('store/bookings', {
         bookings,
@@ -302,15 +283,21 @@ app.post('/reserve/:homeId', async (req, res) => {
     const homeId = req.params.homeId;
     await apiFetch(`/api/bookings/reserve/${homeId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': req.session.user._id
+        },
         body: JSON.stringify(req.body)
-    }, req);
+    });
     res.redirect('/bookings');
 });
 
 app.post('/bookings/cancel/:bookingId', async (req, res) => {
     if (!req.isLoggedIn) return res.redirect('/login');
-    await apiFetch(`/api/bookings/${req.params.bookingId}`, { method: 'DELETE' }, req);
+    await apiFetch(`/api/bookings/${req.params.bookingId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': req.session.user._id }
+    });
     res.redirect('/bookings');
 });
 
@@ -318,7 +305,9 @@ app.post('/bookings/cancel/:bookingId', async (req, res) => {
 
 app.get('/profile', async (req, res) => {
     if (!req.isLoggedIn) return res.redirect('/login');
-    const result = await apiFetch('/api/profile', {}, req);
+    const result = await apiFetch('/api/profile', {
+        headers: { 'x-user-id': req.session.user._id }
+    });
     if (!result.ok || !result.data || !result.data.user) {
         return res.redirect('/');
     }
@@ -348,7 +337,7 @@ app.post(['/profile/edit', '/profile/change-password'], async (req, res) => {
     try {
         const response = await fetch(`${BACKEND_URL}/api/profile`, {
             method: 'PUT',
-            headers: { Authorization: `Bearer ${req.session.apiToken}` },
+            headers: { 'x-user-id': req.session.user._id },
             body: formData
         });
         const data = await response.json().catch(() => null);
@@ -374,7 +363,9 @@ app.use('/host', (req, res, next) => {
 });
 
 app.get(['/host/host-home-list', '/host/my-homes'], async (req, res) => {
-    const result = await apiFetch('/api/host/homes', {}, req);
+    const result = await apiFetch('/api/host/homes', {
+        headers: { 'x-user-id': req.session.user._id }
+    });
     const registeredHomes = result.data && result.data.homes ? result.data.homes : [];
     res.render('host/host-home-list', {
         registeredHomes,
@@ -416,7 +407,7 @@ app.post('/host/add-home', async (req, res) => {
     try {
         await fetch(`${BACKEND_URL}/api/host/homes`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${req.session.apiToken}` },
+            headers: { 'x-user-id': req.session.user._id },
             body: formData
         });
         res.redirect('/host/host-home-list');
@@ -427,7 +418,9 @@ app.post('/host/add-home', async (req, res) => {
 });
 
 app.get('/host/edit-home/:homeId', async (req, res) => {
-    const result = await apiFetch(`/api/host/homes/${req.params.homeId}`, {}, req);
+    const result = await apiFetch(`/api/host/homes/${req.params.homeId}`, {
+        headers: { 'x-user-id': req.session.user._id }
+    });
     if (!result.ok || !result.data || !result.data.home) {
         return res.redirect('/host/host-home-list');
     }
@@ -463,7 +456,7 @@ app.post('/host/edit-home', async (req, res) => {
     try {
         await fetch(`${BACKEND_URL}/api/host/homes/${homeId}`, {
             method: 'PUT',
-            headers: { Authorization: `Bearer ${req.session.apiToken}` },
+            headers: { 'x-user-id': req.session.user._id },
             body: formData
         });
         res.redirect('/host/host-home-list');
@@ -474,7 +467,10 @@ app.post('/host/edit-home', async (req, res) => {
 });
 
 app.post('/host/delete-home/:homeId', async (req, res) => {
-    await apiFetch(`/api/host/homes/${req.params.homeId}`, { method: 'DELETE' }, req);
+    await apiFetch(`/api/host/homes/${req.params.homeId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': req.session.user._id }
+    });
     res.redirect('/host/host-home-list');
 });
 
