@@ -33,24 +33,31 @@ app.use(express.json());
 app.use(upload);
 
 // MongoDB session store (persists across serverless requests on Vercel)
-const store = new MongoDBStore({
-    uri: DB_PATH,
-    collection: 'frontend_sessions'
-});
-
-store.on('error', function(error) {
-    console.error('Frontend session store error:', error);
-});
+let sessionStore;
+if (DB_PATH) {
+    sessionStore = new MongoDBStore({
+        uri: DB_PATH,
+        collection: 'frontend_sessions',
+        connectionOptions: {
+            serverSelectionTimeoutMS: 5000
+        }
+    });
+    sessionStore.on('error', function(error) {
+        console.error('Frontend session store error:', error);
+    });
+} else {
+    console.warn('WARNING: DB_PATH not set — sessions will not persist (broken on Vercel)');
+}
 
 // Session middleware for frontend state
 app.use(session({
     secret: process.env.SESSION_SECRET || 'airbnb-frontend-session-key',
     resave: false,
     saveUninitialized: false,
-    store: store,
+    store: sessionStore,  // undefined = in-memory (dev only), MongoDB store in prod
     cookie: {
         maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
-        secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
+        secure: process.env.NODE_ENV === 'production', // HTTPS only on prod (Vercel = HTTPS)
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
     }
 }));
