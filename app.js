@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
+const MongoDBStore = require('connect-mongodb-session')(session);
 const multer = require('multer');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
@@ -9,6 +10,7 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:5001').replace(/\/$/, '');
+const DB_PATH = (process.env.DB_PATH || '').replace(/^["']|["']$/g, '').trim();
 
 // View engine setup
 app.set('view engine', 'ejs');
@@ -30,12 +32,27 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(upload);
 
+// MongoDB session store (persists across serverless requests on Vercel)
+const store = new MongoDBStore({
+    uri: DB_PATH,
+    collection: 'frontend_sessions'
+});
+
+store.on('error', function(error) {
+    console.error('Frontend session store error:', error);
+});
+
 // Session middleware for frontend state
 app.use(session({
     secret: process.env.SESSION_SECRET || 'airbnb-frontend-session-key',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
+    store: store,
+    cookie: {
+        maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+        secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    }
 }));
 
 app.use((req, res, next) => {

@@ -10,6 +10,7 @@
     "tailwind": "tailwindcss -i ./views/input.css -o ./public/output.css --watch"
   },
   "dependencies": {
+    "connect-mongodb-session": "^3.1.1",
     "dotenv": "^17.4.2",
     "ejs": "^6.0.1",
     "express": "^5.2.1",
