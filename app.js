@@ -32,12 +32,35 @@ app.use(express.json());
 app.use(upload);
 
 // Session middleware for frontend state
-app.use(session({
+// app.use(session({
+const sessionConfig = {
     secret: process.env.SESSION_SECRET || 'airbnb-frontend-session-key',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
-}));
+    cookie: {
+        maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
+        secure: process.env.NODE_ENV === 'production', // HTTPS-only in production
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    }
+};
+
+if (DB_PATH) {
+    const store = new MongoDBStore({
+        uri: DB_PATH,
+        collection: 'frontend_sessions'
+    });
+    store.on('error', function (error) {
+        console.error('Frontend session store error:', error);
+    });
+    sessionConfig.store = store;
+    console.log('Using MongoDB session store');
+} else {
+    console.warn('Warning: DB_PATH not set — using in-memory session store (not suitable for production/Vercel)');
+}
+
+app.use(session(sessionConfig));
+//     cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
+// }));
 
 app.use((req, res, next) => {
     res.locals.isLoggedIn = req.session ? !!req.session.isLoggedIn : false;
